@@ -42,6 +42,8 @@ def inspection_plot(
 
     # Create len(idx)x1 subfigures
     subfigs = fig.subfigures(len(idx), 1)
+    if len(idx) == 1: 
+        subfigs = [subfigs]
     for row, subfig in enumerate(subfigs):
         ds_idx = idx[row]
         batch = ds[ds_idx]

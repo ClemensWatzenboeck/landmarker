@@ -171,6 +171,66 @@ def get_cepha_dataset(path_dir: str, junior: bool = False, cv: bool = True):
     )
 
 
+def get_tiny_cepha_landmark_datasets(
+    path_dir: str,
+    train_transform=None,
+    inference_transform=None,
+    store_imgs=True,
+    dim_img=None,
+    junior=False,
+    N_train=10, 
+    N_test1=2, 
+    N_test2=2
+) -> (
+    LandmarkDataset
+    | tuple[LandmarkDataset, LandmarkDataset, LandmarkDataset]
+    | tuple[LandmarkDataset, LandmarkDataset, LandmarkDataset, LandmarkDataset]
+):
+    """Returns a LandmarkDataset objects with the CEPH dataset, a combination of the ISBI 2014 &
+    2015 challenges. The dataset is split into train, test1 and test2. The same approach as in
+    "CephaNN: A Multi-Head Attention Network for Cephalometric Landmark Detection" - JIAHOONG QIAN
+        et al. is used.
+    """
+    (
+        image_paths_train,
+        image_paths_test1,
+        image_paths_test2,
+        landmarks_train,
+        landmarks_test1,
+        landmarks_test2,
+        pixel_spacings_train,
+        pixel_spacings_test1,
+        pixel_spacings_test2,
+    ) = get_cepha_dataset(path_dir, junior=junior, cv=False)
+    
+    return (
+        LandmarkDataset(
+            image_paths_train[:N_train],
+            landmarks_train[:N_train],
+            pixel_spacing=pixel_spacings_train[:N_train],
+            transform=train_transform,
+            store_imgs=store_imgs,
+            dim_img=dim_img,
+        ),
+        LandmarkDataset(
+            image_paths_test1[:N_test1],
+            landmarks_test1[:N_test1],
+            pixel_spacing=pixel_spacings_test1[:N_test1],
+            transform=inference_transform,
+            store_imgs=store_imgs,
+            dim_img=dim_img,
+        ),
+        LandmarkDataset(
+            image_paths_test2[:N_test2],
+            landmarks_test2[:N_test2],
+            pixel_spacing=pixel_spacings_test2[:N_test2],
+            transform=inference_transform,
+            store_imgs=store_imgs,
+            dim_img=dim_img,
+        ),
+    )
+
+
 def get_cepha_landmark_datasets(
     path_dir: str,
     train_transform=None,
@@ -179,7 +239,7 @@ def get_cepha_landmark_datasets(
     dim_img=None,
     junior=False,
     single_dataset=False,
-    cv=False,
+    cv=False
 ) -> (
     LandmarkDataset
     | tuple[LandmarkDataset, LandmarkDataset, LandmarkDataset]
