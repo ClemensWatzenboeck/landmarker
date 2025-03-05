@@ -68,7 +68,7 @@ def inspection_plot(
         else:
             img_t = img_t.permute(1, 2, 0)
             img = img.permute(1, 2, 0)
-        img = img.detach().numpy().astype(np.uint8)
+        img = img.detach().numpy()
         if heatmap is not None:
             axs = subfig.subplots(nrows=1, ncols=3)
             axs[0].imshow(img_t)
@@ -271,7 +271,7 @@ def prediction_inspect_plot_multi_instance(
         else:
             img_t = img_t.permute(1, 2, 0)
             img = img.permute(1, 2, 0)
-        img = img.detach().numpy().astype(np.uint8)
+        img = img.detach().numpy()
         heatmap = heatmap.squeeze(0)
         axs = subfig.subplots(nrows=1, ncols=3)
         axs[0].imshow(img_t)
