@@ -92,6 +92,7 @@ class GaussianHeatmapL2Loss(nn.Module):
             raise ValueError("spatial_dims must be 2 or 3")
 
     def forward(self, heatmap, sigmas, heatmap_target):
+        sigmas = torch.abs(sigmas)
         if self.spatial_dims == 2:
             loss = F.mse_loss(heatmap, heatmap_target, reduction="sum") / heatmap.shape[
                 0

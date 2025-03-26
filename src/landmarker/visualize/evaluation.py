@@ -4,10 +4,13 @@ from typing import Optional
 
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
+import pandas as pd
 import seaborn as sns  # type: ignore
 import torch
+from tqdm import tqdm
 
 from landmarker.metrics.metrics import point_error, sdr  # type: ignore
+from landmarker.heatmap.decoder import heatmap_to_coord
 
 
 def plot_cpe(
@@ -93,6 +96,69 @@ def plot_cpe(
     plt.show()
 
 
+def evaluate_model_on_loader(
+    model,
+    test_loader,
+    device = "cpu"
+) -> dict:
+
+
+    pred_landmarks = []
+    true_landmarks = []
+    dim_origs = []
+    pixel_spacings = []
+    paddings = []
+    test_mpes = []
+    test_mpe = 0
+    model.to(device)
+    model.eval()
+    with torch.no_grad():
+        for i, X in enumerate(tqdm(test_loader)):
+            images = X["image"]
+            landmarks = X["landmark"]
+            affine_matrix = X["affine"]
+            dim_orig = X["dim_original"] 
+            pixel_spacing = X["spacing"]
+            padding = X["padding"]
+            
+            images = images.to(device)
+            landmarks = landmarks.to(device)
+            dim_orig = dim_orig.to(device)
+            pixel_spacing = pixel_spacing.to(device)
+            padding = padding.to(device)
+            outputs = model(images)
+            # heatmap = heatmap_generator(landmarks)
+            offset_coords = outputs.shape[1]-landmarks.shape[1]
+            pred_landmark = heatmap_to_coord(outputs, offset_coords=offset_coords,
+                                            method="local_soft_argmax")
+            test_mpe = point_error(landmarks, pred_landmark, images.shape[-2:], dim_orig,
+                                    pixel_spacing, padding, reduction="mean")
+            test_mpes.append(test_mpe)
+            pred_landmarks.append(pred_landmark.cpu())
+            true_landmarks.append(landmarks.cpu())
+            dim_origs.append(dim_orig.cpu())
+            pixel_spacings.append(pixel_spacing.cpu())
+            paddings.append(padding.cpu())
+
+    pred_landmarks = torch.cat(pred_landmarks)
+    true_landmarks = torch.cat(true_landmarks)
+    dim_origs = torch.cat(dim_origs)
+    pixel_spacings = torch.cat(pixel_spacings)
+    paddings = torch.cat(paddings)
+
+    #test_mpe = torch.tensor(test_mpes).mean().item()
+    test_mpes = np.array([x.numpy(force=True) for x in  test_mpes])
+
+
+    return {
+        "pred_landmarks": pred_landmarks,
+        "true_landmarks": true_landmarks,
+        "dim_origs": dim_origs,
+        "pixel_spacings": pixel_spacings,
+        "paddings": paddings,
+        "test_mpes": test_mpes
+    }
+
 def detection_report(
     true_landmarks: torch.Tensor,
     pred_landmarks: torch.Tensor,
@@ -105,6 +171,7 @@ def detection_report(
     digits: int = 2,
     unit: str = "mm",
     output_dict: bool = False,
+    print_report: bool = True,
 ):
     """Calculate the detection report.
 
@@ -172,38 +239,56 @@ def detection_report(
         report[class_name]["SDR"] = sdr_class
 
     # Print the detection report in a nice table
-    sdr_names = [f"SDR (PE≤{r}{unit})" for r in radius]
-    print("Detection report:")
-    print("1# Point-to-point error (PE) statistics:")
-    print("=" * (20 + 10 * 5))
-    print(f"{'Class':<20}{'Mean':<10}{'Median':<10}{'Std':<10}{'Min':<10}{'Max':<10}")
-    print("-" * (20 + 10 * 5))
-    for class_name in report:
-        print(
-            f"{class_name:<20}"
-            f"{report[class_name]['Mean']:<10.{digits}f}"
-            f"{report[class_name]['Median']:<10.{digits}f}"
-            f"{report[class_name]['Std']:<10.{digits}f}"
-            f"{report[class_name]['Min']:<10.{digits}f}"
-            f"{report[class_name]['Max']:<10.{digits}f}"
-        )
-    print("=" * (20 + 10 * 5))
-
-    print("\n2# Success detection rate (SDR):")
-    print("=" * (20 + 15 * len(radius)))
-    print("".join([f"{'Class':<20}"] + [f"{sdr_name:<15}" for sdr_name in sdr_names]))
-    print("-" * (20 + 15 * len(radius)))
-    for class_name in report:
-        print(
-            "".join(
-                [f"{class_name:<20}"]
-                + [f"{report[class_name]['SDR'][r]:<15.{digits}f}" for r in radius]  # type: ignore
+    if print_report:
+        sdr_names = [f"SDR (PE≤{r}{unit})" for r in radius]
+        print("Detection report:")
+        print("1# Point-to-point error (PE) statistics:")
+        print("=" * (20 + 10 * 5))
+        print(f"{'Class':<20}{'Mean':<10}{'Median':<10}{'Std':<10}{'Min':<10}{'Max':<10}")
+        print("-" * (20 + 10 * 5))
+        for class_name in report:
+            print(
+                f"{class_name:<20}"
+                f"{report[class_name]['Mean']:<10.{digits}f}"
+                f"{report[class_name]['Median']:<10.{digits}f}"
+                f"{report[class_name]['Std']:<10.{digits}f}"
+                f"{report[class_name]['Min']:<10.{digits}f}"
+                f"{report[class_name]['Max']:<10.{digits}f}"
             )
-        )
-    print("=" * (20 + 15 * len(radius)))
+        print("=" * (20 + 10 * 5))
+
+        print("\n2# Success detection rate (SDR):")
+        print("=" * (20 + 15 * len(radius)))
+        print("".join([f"{'Class':<20}"] + [f"{sdr_name:<15}" for sdr_name in sdr_names]))
+        print("-" * (20 + 15 * len(radius)))
+        for class_name in report:
+            print(
+                "".join(
+                    [f"{class_name:<20}"]
+                    + [f"{report[class_name]['SDR'][r]:<15.{digits}f}" for r in radius]  # type: ignore
+                )
+            )
+        print("=" * (20 + 15 * len(radius)))
 
     if output_dict:
         return report
+
+
+def convert_to_report_df(report_dct, SDR_formating="{:04.1f}"):
+    flat_data = {}
+    for lm, stats in report_dct.items():
+        flat_data[lm] = {}
+        for k, v in stats.items():
+                    if k == "SDR":
+                        for sdr_k, sdr_v in v.items():
+                            flat_data[lm][f"SDR < {SDR_formating.format(sdr_k)}"] = sdr_v
+                    else:
+                        flat_data[lm][k] = v
+
+    # Create the dataframe
+    df = pd.DataFrame.from_dict(flat_data, orient='index')
+    df = df[sorted(df.columns)]
+    return df
 
 
 def multi_instance_detection_report(

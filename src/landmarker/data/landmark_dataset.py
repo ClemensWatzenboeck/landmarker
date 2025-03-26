@@ -65,6 +65,7 @@ class LandmarkDataset(Dataset):
         self.transform = transform
         self.store_imgs = store_imgs
         self.dim_img = dim_img
+        
         if isinstance(imgs, list) and isinstance(imgs[0], str):
             if imgs[0].endswith(".npy"):
                 self.image_loader = Compose(
@@ -141,7 +142,7 @@ class LandmarkDataset(Dataset):
             else:
                 raise ValueError(
                     f"Pixel_spacing must be of shape (N, {self.spatial_dims}) or "
-                    "({self.spatial_dims},) since spatial_dims is {self.spatial_dims}."
+                    f"({self.spatial_dims},) since spatial_dims is {self.spatial_dims}."
                 )
         else:
             self.pixel_spacings = torch.ones(len(self.landmarks_original), self.spatial_dims)
@@ -273,7 +274,11 @@ class LandmarkDataset(Dataset):
         imgs = []
         dim_original = torch.zeros((len(paths), self.spatial_dims))
         for i, path in enumerate(tqdm(paths)):
-            img = self.image_loader(path)
+            try:
+                img = self.image_loader(path)
+            except Exception as e: 
+                print(f"{i=}  {path=}")
+                raise e
             dim_original[i] = torch.tensor(img.shape[-self.spatial_dims :]).float()
             imgs.append(img)
         return imgs, dim_original

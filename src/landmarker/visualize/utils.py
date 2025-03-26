@@ -73,10 +73,10 @@ def inspection_plot(
         img = img.detach().numpy()
         if heatmap is not None:
             axs = subfig.subplots(nrows=1, ncols=3)
-            axs[0].imshow(img_t)
+            axs[0].imshow(img_t, cmap="gray")
             axs[1].imshow(img_t)
             axs[1].imshow(heatmap.detach().numpy().sum(axis=0), cmap="jet", alpha=0.5)
-            axs[2].imshow(img)
+            axs[2].imshow(img, cmap="gray")
             if len(landmark.shape) == 3:  # If multiple instances
                 for i in range(landmark.shape[0]):
                     axs[0].scatter(landmark[i, :, 1], landmark[i, :, 0], c="r", s=5)
@@ -108,6 +108,131 @@ def inspection_plot(
             axs[0].set_title("Transformed w/ landmarks")
             axs[1].set_title("Original w/ landmarks")
         subfig.suptitle(f"Image {ds_idx}")
+    if save_path:
+        plt.savefig(save_path)
+    plt.show()
+
+
+# CW: Just to figure out which landmark is which
+def inspection_plot_numbers(
+    ds: LandmarkDataset,
+    idx: int | Sequence[int],
+    save_path: Optional[str] = None,
+    fig_title: str = "",
+    alpha=0.7
+):
+    """
+    Plots:
+     - Left: Transformed image with landmarks
+     - Right: Original image with enumerated landmarks (numbers) and red crosses
+
+    Args:
+        ds (LandmarkDataset): Dataset to inspect.
+        idx (int | Iterable[int]): Indices of the dataset to inspect.
+        save_path (str, optional): Path to save the plot to. If None, the plot is not saved.
+        fig_title (str, optional): Title of the figure.
+    """
+    if isinstance(idx, int):
+        idx = [idx]
+
+    fig = plt.figure(figsize=(12, 5 * len(idx)))
+    fig.suptitle(fig_title, fontsize=16)
+
+    # Create len(idx) x 1 subfigures
+    subfigs = fig.subfigures(len(idx), 1)
+    if len(idx) == 1:
+        # subfigs will not be a list if there's only one row;
+        # make it iterable by placing in a list
+        subfigs = [subfigs]
+
+    for row, subfig in enumerate(subfigs):
+        ds_idx = idx[row]
+
+        # Grab the data from the dataset
+        batch = ds[ds_idx]
+        landmark = batch["landmark"]                   # Transformed landmarks
+        landmarks_original = ds.landmarks_original[ds_idx]  # Original landmarks
+        img_t = batch["image"]                         # Transformed image (tensor)
+        img_orig = ds.image_loader(ds.img_paths[ds_idx])    # Original image (tensor)
+
+        # Prepare image for plotting
+        if img_t.shape[0] > 3:       # If more than 3 channels, slice to the first 3
+            img_t = img_t[:3]
+            img_orig = img_orig[:3]
+        if img_t.shape[0] == 1:      # Single channel case
+            img_t = img_t[0].permute(1,0)
+            img_orig = img_orig[0].permute(0,1)
+        else:                        # Convert from (C, H, W) to (H, W, C)
+            #img_t = img_t.permute(1, 2, 0)
+            img_t = img_t.permute(0,1,2)
+            img_orig = img_orig.permute(1, 2, 0)
+
+
+
+        # Convert to numpy and to uint8 for matplotlib
+        img_t = img_t.detach().cpu().numpy()#.astype(np.uint8)
+        img_orig = img_orig.detach().cpu().numpy()#.astype(np.uint8)
+
+        # Create subplots (1 row, 2 columns)
+        axs = subfig.subplots(nrows=1, ncols=2, squeeze=False)
+        ax_left = axs[0, 0]
+        ax_left.axis('off')
+        ax_right = axs[0, 1]
+        ax_right.axis('off')
+
+        # --- Left plot: Transformed image w/ landmarks ---
+        ax_left.imshow(img_t)
+        if len(landmark.shape) == 3:
+            # Multiple instances/batches of landmarks for a single image
+            for i in range(landmark.shape[0]):
+                #ax_left.scatter(landmark[i, :, 1], landmark[i, :, 0], c="red", s=5)
+                ax_left.scatter(landmark[i, :, 0], landmark[i, :, 1], c="red", s=5)
+        else:
+            #ax_left.scatter(landmark[:, 1], landmark[:, 0], c="red", s=5)
+            ax_left.scatter(landmark[:, 0], landmark[:, 1], c="red", s=5)
+        #ax_left.set_title("Transformed w/ landmarks")
+
+        # --- Right plot: Original image w/ enumerated landmarks ---
+        ax_right.imshow(img_orig)
+        if len(landmarks_original.shape) == 3:
+            # Multiple instances/batches of landmarks for a single image
+            for i in range(landmarks_original.shape[0]):
+                for j in range(landmarks_original.shape[1]):
+                    y = landmarks_original[i, j, 0]
+                    x = landmarks_original[i, j, 1]
+                    ax_right.scatter(x, y, c="red", marker="x", s=5)
+                    # Add the landmark index (semi-transparent)
+                    ax_right.text(
+                        x,
+                        y,
+                        str(j),
+                        color="black",
+                        alpha=alpha,
+                        fontsize=9,
+                        ha="center",
+                        va="center",
+                    )
+        else:
+            for j in range(landmarks_original.shape[0]):
+                y = landmarks_original[j, 0]
+                x = landmarks_original[j, 1]
+                ax_right.scatter(x, y, c="red", marker="x", s=5)
+                # Add the landmark index (semi-transparent)
+                ax_right.text(
+                    x,
+                    y,
+                    str(j),
+                    color="black",
+                    alpha=alpha,
+                    fontsize=9,
+                    ha="center",
+                    va="center",
+                )
+        #ax_right.set_title("Original w/ enumerated landmarks")
+
+        subfig.suptitle(f"Image {ds_idx}", fontsize=14)
+
+    plt.tight_layout()
     if save_path:
         plt.savefig(save_path)
     plt.show()
@@ -198,6 +323,108 @@ def prediction_inspect_plot(
     if save_path:
         plt.savefig(save_path)
     plt.show()
+
+
+
+def prediction_inspect_plot_transposed(
+    ds: LandmarkDataset,
+    model: nn.Module,
+    idx: int | Sequence[int],
+    activation: nn.Module = nn.Identity(),
+    save_path: Optional[str] = None,
+    fig_title: str = "Landmark Prediction Model Inspection Plot",
+):
+    """
+    Plots the transformed image, predicted heatmap, and original image with predicted and true
+    landmarks for the given dataset indices.
+
+    Args:
+        ds (LandmarkDataset): Dataset to inspect.
+        model (nn.Module): Model to use for prediction.
+        idx (int | Sequence[int]): Indices of the dataset to inspect.
+        activation (nn.Module, optional): Activation function to use. Defaults to nn.Identity().
+        save_path (str, optional): Path to save the plot to. If None, the plot is not saved.
+            Defaults to None.
+        fig_title (str, optional): Title of the figure. Defaults to "Landmark Prediction Model
+            Inspection Plot".
+    """
+    if isinstance(idx, int):
+        idx = [idx]
+
+    fig = plt.figure(figsize=(15, 5 * len(idx)))
+    # fig.suptitle(fig_title)
+
+    # Create len(idx)x1 subfigures
+    subfigs = fig.subfigures(len(idx), 1)
+    for row, subfig in enumerate(subfigs):
+        ds_idx = idx[row]
+        batch = ds[ds_idx]
+        img = ds.image_loader(ds.img_paths[ds_idx])  # type: ignore
+        img_t = batch["image"]
+        heatmap = activation(model(img_t.unsqueeze(0)))
+        landmark_t = batch["landmark"].view((-1, batch["landmark"].shape[-1]))
+        landmarks_original = ds.landmarks_original[ds_idx]
+        landmarks_original = landmarks_original.view((-1, landmarks_original.shape[-1]))
+        pred_landmarks_t = heatmap_to_coord(heatmap, method="local_soft_argmax")
+        pred_landmarks = pixel_to_unit(
+            pred_landmarks_t,
+            pixel_spacing=None,
+            dim=img_t.shape[-2:],
+            dim_orig=batch["dim_original"],
+            padding=batch["padding"],
+        ).squeeze(0)
+        pred_landmarks_t = pred_landmarks_t.squeeze(0)
+        if img_t.shape[0] > 3:  # If more than 3 channels, remove other channels
+            img_t = img_t[:3]
+            img = img[:3]
+        if img_t.shape[0] == 1:
+            img_t = img_t[0]
+            img = img[0]
+        else:
+            img_t = img_t.permute(1, 2, 0)
+            img = img.permute(1, 2, 0)
+        img = img.float()
+        img_t = img_t.float()
+        heatmap = heatmap.squeeze(0)
+        axs = subfig.subplots(nrows=1, ncols=3-1)
+        for ax in axs:
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['bottom'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+        axs[0].imshow(img_t.permute(-1,-2), cmap="gray")
+        axs[0].scatter(landmark_t[:, 0], landmark_t[:, 1], c="b", s=15, marker="+")
+        axs[0].scatter(
+            pred_landmarks_t.detach().numpy()[:, 0],
+            pred_landmarks_t.detach().numpy()[:, 1],
+            c="r",
+            s=15,
+            marker="x"
+        )
+        axs[1].imshow(img_t.permute(-1,-2), cmap="gray")
+        axs[1].imshow(heatmap.detach().numpy().sum(axis=0).transpose(), cmap="jet", alpha=0.5)
+        # axs[2].imshow(img)
+        # axs[2].scatter(landmarks_original[:, 1], landmarks_original[:, 0], c="b", s=5)
+        # axs[2].scatter(
+        #     pred_landmarks.detach().numpy()[:, 1], pred_landmarks.detach().numpy()[:, 0], c="r", s=5
+        # )
+
+        #axs[0].set_title("Transformed w/ landmarks")
+        #axs[1].set_title("Transformed w/ heatmap")
+        # axs[2].set_title("Original w/ landmarks")
+        #subfig.suptitle(f"Image {ds_idx}")
+        #subfig.tight_layout()  # Adjust layout inside each subfigure
+        subfig.subplots_adjust(wspace=-0.1)  # Reduce horizontal space if needed
+    fig.legend(["True", "Predicted"])
+    # After the loop (to adjust global figure layout)
+    fig.tight_layout()
+    #fig.subplots_adjust(hspace=4)  # Reduce vertical space between subfigs
+    if save_path:
+        plt.savefig(save_path)
+    plt.show()
+
 
 
 def prediction_inspect_plot_multi_instance(
