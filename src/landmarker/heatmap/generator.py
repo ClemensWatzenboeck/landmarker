@@ -62,11 +62,12 @@ class HeatmapGenerator(nn.Module):
         """
         if isinstance(sigmas, torch.Tensor):
             device = sigmas.device
+            sigmas = sigmas.to(torch.float)
+            sigmas = sigmas.clone().detach()
+            sigmas.requires_grad_(self.learnable)
         else:
             device = torch.device("cpu")
-        sigmas = torch.tensor(
-            sigmas, device=device, dtype=torch.float, requires_grad=self.learnable
-        )
+            sigmas = torch.tensor(sigmas, device=device, dtype=torch.float, requires_grad=self.learnable)
         sigmas = (
             torch.ones(
                 (self.nb_landmarks, self.spatial_dims),
