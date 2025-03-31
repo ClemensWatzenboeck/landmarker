@@ -316,6 +316,234 @@ class LandmarkDataset(Dataset):
         return imgs, landmarks, dim_original, paddings
 
 
+
+class LandmarkDatasetOnTheFly(Dataset):
+    """
+    A Dataset that does NOT load all images into memory at once.
+    It only stores paths, landmarks, etc., and handles the image
+    loading + transforms in __getitem__.
+    """
+
+    def __init__(
+        self,
+        imgs,
+        landmarks: np.ndarray | torch.Tensor,
+        spatial_dims: int = 2,
+        pixel_spacing: Optional[np.ndarray | torch.Tensor] = None,
+        class_names: Optional[list] = None,
+        transform: Optional[Callable] = None,
+        dim_img: Optional[tuple[int, ...]] = None,
+        img_paths: Optional[list[str]] = None,
+        resize_pad: bool = True,
+    ) -> None:
+        """
+        Args:
+            imgs: list of paths OR list of torch.Tensors/np.arrays
+                  If list of paths (strings), we store them and load on the fly.
+                  If you pass actual arrays/tensors here, we'll store them as well.
+            landmarks: (N, n_landmarks, spatial_dims) or (N, spatial_dims)
+            spatial_dims: 2 or 3
+            pixel_spacing: optional. Typically shape=(N, spatial_dims) or (spatial_dims,)
+            class_names: optional list of names for each landmark class
+            transform: a monai transform or callable to be applied per sample
+            dim_img: (height,width) for 2D or (depth,height,width) for 3D
+            img_paths: used only if you pass actual arrays for `imgs` but still want to remember the paths
+            resize_pad: whether to do a pad-based resize (True) or direct resizing
+        """
+        super().__init__()
+        if spatial_dims not in [2, 3]:
+            raise ValueError(f"spatial_dims must be 2 or 3, got {spatial_dims}")
+        self.spatial_dims = spatial_dims
+        self.resize_pad = resize_pad
+        self.transform = transform
+        self.dim_img = dim_img
+
+        # if the images are paths, set up a loader transform for them
+        if isinstance(imgs, list) and len(imgs) > 0 and isinstance(imgs[0], str):
+            # you can replicate your specialized logic for .npy or .png etc.:
+            if imgs[0].endswith(".npy"):
+                self.image_loader = Compose(
+                    [LoadImage(image_only=True, ensure_channel_first=True)]
+                )
+            elif self.spatial_dims == 2:
+                self.image_loader = Compose(
+                    [
+                        LoadImage(image_only=True, ensure_channel_first=True),
+                        Transpose(indices=[0, 2, 1]),
+                    ]
+                )
+            else:
+                self.image_loader = Compose(
+                    [
+                        LoadImage(image_only=True, ensure_channel_first=True),
+                        Transpose(indices=[0, 3, 2, 1]),
+                    ]
+                )
+        else:
+            self.image_loader = None  # means we won't do path-based loading
+
+        # Store landmarks in torch.Tensor form
+        self._init_landmarks(landmarks, class_names)
+
+        # Prepare images: store them as either paths or Tensors 
+        # (but do NOT read all from disk).
+        self._init_imgs(imgs, img_paths)
+
+        # Store pixel spacings for each sample
+        self._init_pixel_spacing(pixel_spacing)
+
+    def _init_landmarks(
+        self,
+        landmarks: np.ndarray | torch.Tensor,
+        class_names: Optional[list],
+    ) -> None:
+        # same logic from your original code
+        if len(landmarks.shape) == 2:
+            # (N, D) => (N, 1, D) if only one class
+            landmarks = landmarks.reshape((landmarks.shape[0], 1, landmarks.shape[1]))
+
+        self.nb_landmarks = landmarks.shape[1]
+        assert self.spatial_dims == landmarks.shape[-1], \
+            f"landmarks should have last dimension == {self.spatial_dims}"
+
+        if isinstance(landmarks, np.ndarray):
+            self.landmarks_original = torch.as_tensor(landmarks, dtype=torch.float32)
+        elif isinstance(landmarks, torch.Tensor):
+            self.landmarks_original = landmarks.clone().float()
+        else:
+            raise TypeError("landmarks must be np.ndarray or torch.Tensor")
+
+        if class_names is None:
+            self.class_names = [f"landmark_{i}" for i in range(self.nb_landmarks)]
+        else:
+            if len(class_names) != self.nb_landmarks:
+                raise ValueError("class_names must match number of landmarks")
+            self.class_names = class_names
+
+    def _init_pixel_spacing(
+        self,
+        pixel_spacing: Optional[np.ndarray | torch.Tensor]
+    ) -> None:
+        # same logic from your original code, just store in memory
+        N = len(self.landmarks_original)
+        if pixel_spacing is not None:
+            ps = torch.as_tensor(pixel_spacing, dtype=torch.float32)
+            # shape checking
+            if ps.ndim == 1 and ps.shape[0] == self.spatial_dims:
+                # (spatial_dims,) => repeat across all images
+                self.pixel_spacings = ps.unsqueeze(0).repeat(N, 1)
+            elif ps.ndim == 2 and ps.shape[1] == self.spatial_dims:
+                # (N, spatial_dims)
+                self.pixel_spacings = ps
+            else:
+                raise ValueError(
+                    f"pixel_spacing must be shape (N, {self.spatial_dims}) or ({self.spatial_dims},)"
+                )
+        else:
+            self.pixel_spacings = torch.ones(N, self.spatial_dims)
+
+    def _init_imgs(
+        self,
+        imgs,
+        img_paths: Optional[list[str]],
+    ) -> None:
+        """
+        Store only references:
+         - if imgs is a list of strings: store them as self.img_paths
+         - else if it's a list of Tensors or a single Tensor: store them in self.imgs
+         - if we want the paths but user only gave arrays, we can store them in self.img_paths
+        """
+        if isinstance(imgs, list):
+            if len(imgs) > 0 and isinstance(imgs[0], str):
+                # store as paths
+                self.img_paths = imgs
+                self.imgs = None
+            elif len(imgs) > 0 and isinstance(imgs[0], (np.ndarray, torch.Tensor)):
+                # store as Tensors
+                self.imgs = [
+                    torch.as_tensor(img_i, dtype=torch.float32) for img_i in imgs
+                ]
+                self.img_paths = img_paths if img_paths is not None else []
+            else:
+                raise TypeError(f"imgs type not supported: {type(imgs[0])}")
+        else:
+            # if imgs is np.ndarray or torch.Tensor of shape (N, ...)
+            # store them as a list of Tensors for uniformity
+            self.imgs = [torch.as_tensor(imgs[i], dtype=torch.float32) 
+                         for i in range(len(imgs))]
+            self.img_paths = img_paths if img_paths is not None else []
+
+    def __len__(self) -> int:
+        return len(self.landmarks_original)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        """
+        Loads (or retrieves) the image at `idx`, 
+        calculates the `dim_original`, resizes/pads if needed, 
+        transforms both the image + landmark, and returns them in a dict.
+        """
+        # fetch landmarks for this idx
+        landmark_original = self.landmarks_original[idx]
+        # pixel spacing
+        spacing = self.pixel_spacings[idx]
+
+        # Load or retrieve image
+        if self.imgs is not None:
+            img = self.imgs[idx]
+        else:
+            # We only have paths
+            path = self.img_paths[idx]
+            img = self.image_loader(path)
+
+        # figure out dimension from loaded/obtained image
+        dim_original = torch.tensor(img.shape[-self.spatial_dims:], dtype=torch.float32)
+
+        # Possibly resize/pad
+        padding = torch.zeros(self.spatial_dims, dtype=torch.float32)
+        if self.dim_img is not None:
+            if self.resize_pad:
+                img, pad = resize_with_pad(img, self.dim_img)
+                padding = torch.as_tensor(pad, dtype=torch.float32)
+                landmark = resize_landmarks(
+                    landmark_original, dim_original, self.dim_img, padding
+                )
+            else:
+                # direct resizing
+                img = Resize(spatial_size=self.dim_img)(img)
+                landmark = resize_landmarks(
+                    landmark_original, dim_original, self.dim_img
+                )
+        else:
+            # no resizing; just keep it
+            landmark = landmark_original
+
+        # Now apply any transforms that handle both image+landmarks
+        # The monai Compose typically only transforms image, so we handle landmarks manually
+        affine_matrix = torch.eye(4, dtype=torch.float32)  # by default
+        if self.transform is not None:
+            # Apply the transform to the image
+            img_t = self.transform({"image": img})["image"]
+            # Grab the "pull" affine from the metadata (if present)
+            affine_matrix_pull = img_t.meta.get("affine", None)
+            if affine_matrix_pull is not None:
+                affine_matrix_pull = affine_matrix_pull.float()
+                # invert to get push
+                affine_matrix = torch.linalg.inv(affine_matrix_pull)
+            # transform landmarks accordingly
+            landmark_t = affine_landmarks(landmark, affine_matrix)
+        else:
+            img_t = img
+            landmark_t = landmark
+
+        return {
+            "image": img_t,                  # final image
+            "landmark": landmark_t,          # final (transformed) landmarks
+            "affine": affine_matrix,         # used for pushing landmarks
+            "dim_original": dim_original,    # shape of the original image
+            "spacing": spacing,              # pixel spacing
+            "padding": padding,              # how much was padded if any
+        }
+
 class PatchDataset(LandmarkDataset):
     """
     ``PatchDataset`` is a subclass of ``LandmarkDataset``. It represents a dataset of images and
