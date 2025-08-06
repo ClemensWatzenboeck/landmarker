@@ -333,6 +333,7 @@ def prediction_inspect_plot_transposed(
     activation: nn.Module = nn.Identity(),
     save_path: Optional[str] = None,
     fig_title: str = "Landmark Prediction Model Inspection Plot",
+    selection=None
 ):
     """
     Plots the transformed image, predicted heatmap, and original image with predicted and true
@@ -395,14 +396,24 @@ def prediction_inspect_plot_transposed(
             ax.spines['bottom'].set_visible(False)
             ax.spines['left'].set_visible(False)
         axs[0].imshow(img_t.permute(-1,-2), cmap="gray")
-        axs[0].scatter(landmark_t[:, 0], landmark_t[:, 1], c="b", s=15, marker="+")
-        axs[0].scatter(
-            pred_landmarks_t.detach().numpy()[:, 0],
-            pred_landmarks_t.detach().numpy()[:, 1],
-            c="r",
-            s=15,
-            marker="x"
-        )
+        if selection ==None: 
+            axs[0].scatter(landmark_t[:, 0], landmark_t[:, 1], c="b", s=15, marker="+")
+            axs[0].scatter(
+                pred_landmarks_t.detach().numpy()[:, 0],
+                pred_landmarks_t.detach().numpy()[:, 1],
+                c="r",
+                s=15,
+                marker="x"
+            )
+        else: 
+            axs[0].scatter(landmark_t[selection, 0], landmark_t[selection, 1], c="b", s=15, marker="+")
+            axs[0].scatter(
+                pred_landmarks_t.detach().numpy()[selection, 0],
+                pred_landmarks_t.detach().numpy()[selection, 1],
+                c="r",
+                s=15,
+                marker="x"
+            )            
         axs[1].imshow(img_t.permute(-1,-2), cmap="gray")
         axs[1].imshow(heatmap.detach().numpy().sum(axis=0).transpose(), cmap="jet", alpha=0.5)
         # axs[2].imshow(img)

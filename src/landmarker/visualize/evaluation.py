@@ -12,7 +12,6 @@ from tqdm import tqdm
 from landmarker.metrics.metrics import point_error, sdr  # type: ignore
 from landmarker.heatmap.decoder import heatmap_to_coord
 
-
 def plot_cpe(
     true_landmarks: torch.Tensor,
     pred_landmarks: torch.Tensor,
@@ -27,15 +26,17 @@ def plot_cpe(
     stat: str = "proportion",
     unit: str = "mm",
     kind: str = "ecdf",
+    ax: Optional[plt.Axes] = None,
+    return_axis=False
 ):
     """Calculate the cumulative point-to-point error (CPE) and plot the CPE curve.
 
     Args:
-        y_true : numpy.ndarray
+        true_landmarks : torch.Tensor
             The true values of the target variable, with shape (n, p, 2).
             n is the number of samples, p is the number of landmarks,
             and 2 is respectively the y and x coordinates of the landmarks.
-        y_pred : numpy.ndarray
+        pred_landmarks : torch.Tensor
             The predicted values of the target variable, with shape (n, p, 2).
             n is the number of samples, p is the number of landmarks,
             and 2 is respectively the y and x coordinates of the landmarks.
@@ -54,6 +55,10 @@ def plot_cpe(
         kind : str, optional
             The type of plot. The default is 'ecdf'.
             Possible values are 'ecdf', 'kde', and 'hist'.
+        ax : matplotlib.axes.Axes, optional
+            A matplotlib axes object to plot on. The default is None.
+        return_axis : bool, optional
+            Whether to return the axis. The default is False.
     """
     # Calculate the point-to-point error (PE)
     pe = point_error(
@@ -63,22 +68,30 @@ def plot_cpe(
     if len(pe.shape) == 3:
         pe = np.nansum(pe, axis=-1)
 
-    # Plot the CPE curve
     if group:
+        # Use provided ax or create a new one
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = ax.get_figure()
         # Calculate the mean point-to-point error (MPE) for each sample
         pe = np.nanmean(pe, axis=1)
         if kind == "ecdf":
-            ax = sns.ecdfplot(x=pe, stat=stat, label="Sample MPE")
+            sns.ecdfplot(x=pe, stat=stat, ax=ax, label="Sample MPE")
         elif kind == "kde":
-            ax = sns.kdeplot(x=pe, cumulative=True, label="Sample MPE")
+            sns.kdeplot(x=pe, cumulative=True, ax=ax, label="Sample MPE")
         elif kind == "hist":
-            ax = sns.histplot(x=pe, stat=stat, cumulative=True, label="Sample MPE")
+            sns.histplot(x=pe, stat=stat, cumulative=True, ax=ax, label="Sample MPE")
         else:
             raise ValueError(f"Invalid kind: {kind!r}.")
     else:
+        # Use provided ax or create a new one
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = ax.get_figure()
         if class_names is None:
             class_names = [f"Landmark {i}" for i in range(true_landmarks.shape[1])]
-        fig, ax = plt.subplots()
         for i, class_name in enumerate(class_names):
             if kind == "ecdf":
                 sns.ecdfplot(x=pe[:, i], stat=stat, ax=ax, label=class_name)
@@ -88,12 +101,15 @@ def plot_cpe(
                 sns.histplot(x=pe[:, i], stat=stat, cumulative=True, ax=ax, label=class_name)
             else:
                 raise ValueError(f"Invalid kind: {kind!r}.")
+
     ax.set(xlabel=f"IPE in {unit}", ylabel="Proportion of images", title=title)
     ax.grid()
     ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
     if save_path is not None:
         fig.savefig(save_path)
-    plt.show()
+    if return_axis: 
+        return ax
+    #plt.show()
 
 
 def evaluate_model_on_loader(
@@ -158,6 +174,9 @@ def evaluate_model_on_loader(
         "paddings": paddings,
         "test_mpes": test_mpes
     }
+
+
+
 
 def detection_report(
     true_landmarks: torch.Tensor,

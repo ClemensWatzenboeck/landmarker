@@ -407,7 +407,7 @@ class LandmarkDatasetOnTheFly(Dataset):
             f"landmarks should have last dimension == {self.spatial_dims}"
 
         if isinstance(landmarks, np.ndarray):
-            self.landmarks_original = torch.as_tensor(landmarks, dtype=torch.float32)
+            self.landmarks_original = torch.as_tensor(landmarks.copy(), dtype=torch.float32)
         elif isinstance(landmarks, torch.Tensor):
             self.landmarks_original = landmarks.clone().float()
         else:
